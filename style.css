@@ -8,3 +8,8 @@ html,body{height:100%;margin:0;background:#0b0b0d;color:#fff;font-family:Inter,S
 /* overlay click hint */
 #overlay{cursor:default}
 #overlay:not(.hidden) #message{cursor:pointer}
+
+/* story text formatting */
+#message strong{display:block;font-size:20px;margin-bottom:6px}
+#message p{margin:0;font-size:15px;line-height:1.4;color:#ddd}
+#message small{color:#aaa}

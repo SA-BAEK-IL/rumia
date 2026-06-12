@@ -69,6 +69,18 @@ let spawnedIndex = 0;
 
 let gameOver = false;
 let deathReason = '';
+// Story nodes per wave (array of pages)
+const stories = [
+  [
+    {title:'Prologue', text:'너의 심장은 멈췄다. 저주는 숨을 거두지 않는다. 그러나 이제 손으로 펌프질해야만 산다.'},
+    {title:'단서: 기묘한 잔여물', text:'벽에 묻은 점액은 누군가의 흔적처럼 보인다. 닦아내면 더 많은 흔적이 드러난다.'}
+  ],
+  [
+    {title:'심연의 메아리', text:'박동이 빨라질수록 환각은 뚜렷해진다. 하지만 균형을 잃으면 모든 것이 끝난다.'},
+    {title:'단서: 깨진 사포', text:'작은 사포 조각이 바닥에 떨어져 있다. 뭔가를 닦아내려 했던 흔적일까.'}
+  ]
+];
+let storyIndex = 0;
 
 function startWave(index){
   currentWave = index||0;
@@ -82,6 +94,8 @@ function startWave(index){
   overlay.classList.add('hidden');
   ensureAudio();
   scheduleAudioLoop();
+  overlay.dataset.mode = '';
+  restartBtn.style.display = 'inline-block';
 }
 
 function fail(reason){
@@ -93,6 +107,8 @@ function fail(reason){
 function showGameOver(){
   messageEl.textContent = deathReason;
   overlay.classList.remove('hidden');
+  overlay.dataset.mode = 'gameover';
+  restartBtn.style.display = 'inline-block';
 }
 
 function resetWave(){
@@ -107,11 +123,21 @@ addEventListener('keydown', e=>{
 });
 
 overlay.addEventListener('click', (e)=>{
-  // if in STORY, clicking overlay proceeds to next wave
-  if(state === STATE.STORY){
-    state = STATE.SURVIVAL;
-    const next = (currentWave + 1) % waves.length;
-    startWave(next);
+  // overlay click behavior depends on mode
+  const mode = overlay.dataset.mode || '';
+  if(mode === 'story' && state === STATE.STORY){
+    const s = stories[currentWave] || [];
+    storyIndex++;
+    if(storyIndex >= s.length){
+      // proceed to next wave
+      state = STATE.SURVIVAL;
+      overlay.dataset.mode = '';
+      const next = (currentWave + 1) % waves.length;
+      startWave(next);
+    } else {
+      const node = s[storyIndex];
+      messageEl.innerHTML = `<strong>${node.title}</strong><p style="margin-top:8px">${node.text}</p><small style="display:block;margin-top:8px;opacity:0.8">클릭하여 계속</small>`;
+    }
   }
 });
 
@@ -198,8 +224,18 @@ function update(dt, now){
   // wave end -> STORY phase
   if(elapsed >= wd.length){
     state = STATE.STORY;
+    // prepare story pages for this wave
+    const s = stories[currentWave] || [];
+    storyIndex = 0;
+    overlay.dataset.mode = 'story';
     overlay.classList.remove('hidden');
-    messageEl.textContent = '휴식 구간 — 저주에 관한 단서가 드러납니다. 클릭하여 계속';
+    if(s.length>0){
+      const node = s[0];
+      messageEl.innerHTML = `<strong>${node.title}</strong><p style="margin-top:8px">${node.text}</p><small style="display:block;margin-top:8px;opacity:0.8">클릭하여 계속</small>`;
+    } else {
+      messageEl.textContent = '휴식 구간 — 클릭하여 다음으로';
+    }
+    restartBtn.style.display = 'none';
   }
   for(const ob of obstacles){
     if(ob.type==='hold' && ob.holdStart){
