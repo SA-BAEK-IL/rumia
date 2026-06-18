@@ -10,7 +10,15 @@
   <canvas id="gameCanvas"></canvas>
   <div id="overlay" class="hidden">
     <div id="message"></div>
+    <div id="choicePanel"></div>
     <button id="restartBtn">재시도 (R)</button>
+  </div>
+  <button id="logBtn" class="log-btn">단서 로그 (L)</button>
+  <div id="logPanel" class="hidden">
+    <div id="logHeader">단서 / 기록</div>
+    <input id="logSearch" placeholder="검색어 입력" />
+    <div id="logContent"></div>
+    <button id="closeLogBtn">닫기</button>
   </div>
   <script src="main.js"></script>
 </body>

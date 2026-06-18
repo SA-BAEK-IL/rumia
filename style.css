@@ -13,3 +13,18 @@ html,body{height:100%;margin:0;background:#0b0b0d;color:#fff;font-family:Inter,S
 #message strong{display:block;font-size:20px;margin-bottom:6px}
 #message p{margin:0;font-size:15px;line-height:1.4;color:#ddd}
 #message small{color:#aaa}
+
+.log-btn{position:fixed;bottom:20px;right:20px;padding:10px 14px;border-radius:999px;border:0;background:#34495e;color:#fff;font-weight:700;cursor:pointer;z-index:10;box-shadow:0 10px 30px rgba(0,0,0,0.35)}
+#logPanel{position:fixed;inset:10%;background:rgba(12,12,16,0.98);border:2px solid #5c6bc0;border-radius:18px;padding:22px;box-shadow:0 20px 60px rgba(0,0,0,0.75);z-index:20;display:flex;flex-direction:column;}
+#logHeader{font-size:22px;font-weight:800;margin-bottom:10px;color:#f4f4f8}
+#logSearch{margin-bottom:14px;padding:10px 12px;border-radius:12px;border:1px solid rgba(255,255,255,0.15);background:rgba(255,255,255,0.05);color:#fff;font-size:14px;outline:none}
+#logSearch::placeholder{color:rgba(255,255,255,0.55)}
+#logContent{overflow-y:auto;flex:1;background:rgba(255,255,255,0.04);padding:14px;border-radius:12px;color:#ddd;font-size:14px;line-height:1.6}
+#logContent .entry{margin-bottom:14px;padding-bottom:10px;border-bottom:1px solid rgba(255,255,255,0.08)}
+#logContent .entry:last-child{border-bottom:none;margin-bottom:0;padding-bottom:0}
+#logContent .entry-title{font-weight:700;color:#f1c40f}
+#logContent .entry-meta{font-size:12px;color:#bbb;margin-top:4px}
+#closeLogBtn{margin-top:16px;padding:10px 14px;border-radius:10px;border:0;background:#c0392b;color:#fff;font-weight:700;cursor:pointer;}
+#choicePanel{display:flex;flex-wrap:wrap;gap:10px;margin-top:16px;justify-content:center}
+.choice-button{padding:10px 14px;border-radius:10px;border:0;background:#2ecc71;color:#111;font-weight:700;cursor:pointer;transition:transform 0.15s ease;}
+.choice-button:hover{transform:scale(1.05)}
