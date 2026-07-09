@@ -13,6 +13,9 @@ let H = 0;
 function resize() {
   W = canvas.width = innerWidth;
   H = canvas.height = innerHeight;
+  bgGradient = ctx.createLinearGradient(0, 0, W, H);
+  bgGradient.addColorStop(0, '#080b12');
+  bgGradient.addColorStop(1, '#161a27');
 }
 
 window.addEventListener('resize', resize);
@@ -67,7 +70,7 @@ let waveIndex = 0;
 let waveTime = 0;
 let eventIndex = 0;
 let obstacles = [];
-let pointer = { x: W / 2, y: H / 2, down: false };
+let pointer = { x: W / 2, y: H / 2 };
 let player = { x: W / 2, y: H / 2, speed: 260, radius: 16 };
 
 let maxHealth = 3;
@@ -82,6 +85,9 @@ let shake = 0;
 let activeTempo = null;
 let lastTime = 0;
 let statusText = '박동 대기';
+let rafId = null;
+let bgGradient = null;
+let checkpointAvailable = false;
 
 function startGame() {
   state = STATE.PLAYING;
@@ -104,17 +110,98 @@ function startGame() {
   pointer.y = H / 2;
   statusText = '박동 시작';
   updateHud();
+  lastTime = performance.now();
+  if (rafId) cancelAnimationFrame(rafId);
+  rafId = requestAnimationFrame(loop);
+  checkpointAvailable = true;
 }
 
 function updateHud() {
   const wave = waves[waveIndex];
+  const saved = localStorage.getItem('heartbeat-save') ? '저장됨' : '없음';
+  const checkpoint = checkpointAvailable ? '가능' : '불가';
   hudEl.innerHTML = `
     <div>웨이브: ${waveIndex + 1} / ${waves.length}</div>
     <div>상태: ${state === STATE.PLAYING ? wave.title : '대기'}</div>
     <div>체력: ${'♥'.repeat(health)}${'♡'.repeat(maxHealth - health)}</div>
     <div>박동: ${statusText}</div>
+    <div>저장: ${saved}</div>
+    <div>체크포인트: ${checkpoint}</div>
   `;
 }
+
+const SAVE_KEY = 'heartbeat-save';
+
+function getSaveObject() {
+  return {
+    state,
+    waveIndex,
+    waveTime,
+    eventIndex,
+    obstacles,
+    pointer,
+    player,
+    health,
+    beatInterval,
+    beatTimer,
+    beatActive,
+    beatStartAt,
+    activeTempo,
+    statusText
+  };
+}
+
+function showTemporaryMessage(msg) {
+  const prev = messageEl.innerHTML;
+  messageEl.innerHTML = msg;
+  setTimeout(() => { messageEl.innerHTML = prev; }, 1200);
+}
+
+function saveGame() {
+  if (!checkpointAvailable) { showTemporaryMessage('체크포인트가 아닙니다'); return; }
+  try {
+    const data = getSaveObject();
+    localStorage.setItem(SAVE_KEY, JSON.stringify(data));
+    checkpointAvailable = false;
+    updateHud();
+    showTemporaryMessage('저장 완료');
+  } catch (e) {
+    showTemporaryMessage('저장 실패');
+  }
+}
+
+function loadGame() {
+  const raw = localStorage.getItem(SAVE_KEY);
+  if (!raw) { showTemporaryMessage('저장 없음'); return; }
+  try {
+    const obj = JSON.parse(raw);
+    state = obj.state || STATE.PLAYING;
+    waveIndex = obj.waveIndex || 0;
+    waveTime = obj.waveTime || 0;
+    eventIndex = obj.eventIndex || 0;
+    obstacles = obj.obstacles || [];
+    pointer = obj.pointer || pointer;
+    player = obj.player || player;
+    health = typeof obj.health === 'number' ? obj.health : maxHealth;
+    beatInterval = obj.beatInterval || beatInterval;
+    beatTimer = (typeof obj.beatTimer === 'number') ? obj.beatTimer : 0.6;
+    beatActive = !!obj.beatActive;
+    beatStartAt = (typeof obj.beatStartAt === 'number') ? obj.beatStartAt : waveTime;
+    activeTempo = obj.activeTempo || null;
+    statusText = obj.statusText || statusText;
+    updateHud();
+    if (state === STATE.PLAYING) {
+      lastTime = performance.now();
+      if (rafId) cancelAnimationFrame(rafId);
+      rafId = requestAnimationFrame(loop);
+    }
+    showTemporaryMessage('불러오기 완료');
+  } catch (e) {
+    showTemporaryMessage('불러오기 실패');
+  }
+}
+
+function deleteSave() { localStorage.removeItem(SAVE_KEY); updateHud(); showTemporaryMessage('저장 삭제'); }
 
 function showOverlay(title, message, showRestart = false) {
   titleEl.textContent = title;
@@ -126,6 +213,7 @@ function showOverlay(title, message, showRestart = false) {
 
 function endGame() {
   state = STATE.GAMEOVER;
+  if (rafId) { cancelAnimationFrame(rafId); rafId = null; }
   showOverlay('심장이 멈췄다', '박동을 놓치고 끝이 찾아왔습니다.<br>다시 도전해 보세요.', true);
 }
 
@@ -147,6 +235,7 @@ function nextWave() {
   activeTempo = null;
   statusText = `${waves[waveIndex].title} 진입`;
   updateHud();
+  checkpointAvailable = true;
 }
 
 function takeDamage(reason) {
@@ -181,7 +270,7 @@ function spawnObstacle(event) {
 
 function activateTempo(event) {
   activeTempo = {
-    endAt: performance.now() / 1000 + (event.duration || 4),
+    endAt: waveTime + (event.duration || 4),
     bpm: event.bpm,
     title: event.title || '가속'
   };
@@ -205,7 +294,7 @@ function updateWave(dt) {
     eventIndex += 1;
   }
 
-  if (activeTempo && performance.now() / 1000 > activeTempo.endAt) {
+  if (activeTempo && waveTime > activeTempo.endAt) {
     activeTempo = null;
     beatInterval = 60 / waves[waveIndex].bpm;
     beatTimer = Math.max(0.2, beatInterval * 0.45);
@@ -222,7 +311,7 @@ function updateHeartbeat(dt) {
   if (state !== STATE.PLAYING) return;
 
   if (beatActive) {
-    const elapsed = performance.now() / 1000 - beatStartAt;
+    const elapsed = waveTime - beatStartAt;
     beatFlash = Math.max(0, 1 - elapsed / beatWindow);
     if (elapsed > beatWindow) {
       beatActive = false;
@@ -234,7 +323,7 @@ function updateHeartbeat(dt) {
   beatTimer -= dt;
   if (beatTimer <= 0) {
     beatActive = true;
-    beatStartAt = performance.now() / 1000;
+    beatStartAt = waveTime;
     beatTimer = beatInterval;
     beatFlash = 1;
   }
@@ -242,7 +331,7 @@ function updateHeartbeat(dt) {
 
 function resolveBeat() {
   if (!beatActive || state !== STATE.PLAYING) return;
-  const elapsed = performance.now() / 1000 - beatStartAt;
+  const elapsed = waveTime - beatStartAt;
   const error = Math.abs(elapsed);
 
   beatActive = false;
@@ -308,10 +397,7 @@ function movePlayer(dt) {
 }
 
 function drawBackground() {
-  const gradient = ctx.createLinearGradient(0, 0, W, H);
-  gradient.addColorStop(0, '#080b12');
-  gradient.addColorStop(1, '#161a27');
-  ctx.fillStyle = gradient;
+  ctx.fillStyle = bgGradient || '#080b12';
   ctx.fillRect(0, 0, W, H);
 
   const waveGlow = 20 + (beatActive ? 20 : 0) + shake * 24;
@@ -413,13 +499,16 @@ function loop(now) {
 
   draw();
   shake = Math.max(0, shake - dt * 0.4);
-  requestAnimationFrame(loop);
+  if (state === STATE.PLAYING) {
+    rafId = requestAnimationFrame(loop);
+  } else {
+    rafId = null;
+  }
 }
 
 function handlePointerDown(e) {
   pointer.x = e.clientX;
   pointer.y = e.clientY;
-  pointer.down = true;
 
   if (state !== STATE.PLAYING) return;
 
@@ -445,7 +534,6 @@ function handlePointerMove(e) {
 }
 
 function handlePointerUp() {
-  pointer.down = false;
   for (const ob of obstacles) {
     ob.dragging = false;
     ob.holding = false;
@@ -458,6 +546,15 @@ function handleKeydown(e) {
     if (state === STATE.PLAYING) {
       resolveBeat();
     }
+  }
+  if (e.code === 'KeyS') {
+    e.preventDefault(); saveGame();
+  }
+  if (e.code === 'KeyL') {
+    e.preventDefault(); loadGame();
+  }
+  if (e.code === 'KeyD') {
+    e.preventDefault(); deleteSave();
   }
   if (e.code === 'Enter' && state !== STATE.PLAYING) {
     startGame();
@@ -477,3 +574,4 @@ restartBtn.addEventListener('click', startGame);
 
 showOverlay('Heartbeat', '마우스로 이동하고<br>박동에 맞춰 Space를 눌러 생존하세요.', false);
 updateHud();
+// 루프는 게임 시작 시에만 시작합니다.

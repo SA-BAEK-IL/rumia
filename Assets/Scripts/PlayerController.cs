@@ -1,80 +1,37 @@
 using UnityEngine;
 
+// Player now strictly follows the mouse cursor. Keyboard movement removed.
 public class PlayerController : MonoBehaviour
 {
-    public float moveSpeed = 5f;
-    public float jumpForce = 10f;
-    public float beatTolerance = 0.12f;
-    public float defaultBpm = 70f;
-
+    public float moveSpeed = 8f;
     private Rigidbody2D rb;
-    private Vector2 moveDirection;
-    private bool isGrounded;
-    private float nextBeatTime;
-    private float beatInterval;
-    private bool spaceHeld;
-    private float lastSpaceTime;
+    private Camera mainCam;
 
     void Awake()
     {
         rb = GetComponent<Rigidbody2D>();
-        beatInterval = 60f / defaultBpm;
-        nextBeatTime = Time.time + beatInterval;
+        mainCam = Camera.main;
     }
 
     void Update()
     {
-        moveDirection = new Vector2(Input.GetAxisRaw("Horizontal"), 0f).normalized;
-        if (Input.GetKey(KeyCode.Space))
-        {
-            spaceHeld = true;
-            lastSpaceTime = Time.time;
-            CheckBeat(Time.time);
-        }
-        else if (Input.GetKeyUp(KeyCode.Space))
-        {
-            spaceHeld = false;
-            lastSpaceTime = Time.time;
-        }
-
-        if (Input.GetKeyDown(KeyCode.C))
-        {
-            GameManager.Instance.ToggleMovementPause();
-        }
-    }
-
-    void FixedUpdate()
-    {
-        if (GameManager.Instance.IsMovementPaused)
+        if (GameManager.Instance != null && GameManager.Instance.IsMovementPaused)
             return;
 
-        Vector2 velocity = rb.velocity;
-        velocity.x = moveDirection.x * moveSpeed;
-        rb.velocity = velocity;
-    }
+        if (mainCam == null) return;
 
-    private void CheckBeat(float currentTime)
-    {
-        float delta = currentTime - nextBeatTime;
-        if (Mathf.Abs(delta) <= beatTolerance)
+        Vector3 mouseWorld = mainCam.ScreenToWorldPoint(Input.mousePosition);
+        Vector2 target = new Vector2(mouseWorld.x, mouseWorld.y);
+
+        if (rb != null)
         {
-            nextBeatTime += beatInterval;
-            // TODO: 플레이어 박자 성공 이펙트
+            // use velocity for smoother physics-driven movement if Rigidbody2D present
+            Vector2 dir = (target - (Vector2)transform.position);
+            rb.velocity = dir.normalized * moveSpeed;
         }
         else
         {
-            GameManager.Instance.OnBeatFail(delta > 0 ? "정지 - 박자를 놓쳤습니다" : "과부하 - 박자를 너무 빨리 누르셨습니다");
+            transform.position = Vector2.MoveTowards(transform.position, target, moveSpeed * Time.deltaTime);
         }
-    }
-
-    public void SetBpm(float bpm)
-    {
-        beatInterval = 60f / bpm;
-        nextBeatTime = Time.time + beatInterval;
-    }
-
-    public bool IsSpaceHeldLongEnough()
-    {
-        return spaceHeld || Time.time - lastSpaceTime <= 0.35f;
     }
 }
