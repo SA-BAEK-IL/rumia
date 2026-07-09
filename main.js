@@ -1,538 +1,479 @@
 const canvas = document.getElementById('gameCanvas');
-const overlay = document.getElementById('overlay');
-const messageEl = document.getElementById('message');
-const restartBtn = document.getElementById('restartBtn');
 const ctx = canvas.getContext('2d');
-let W = 0, H = 0;
-function resize(){ W = canvas.width = innerWidth; H = canvas.height = innerHeight }
-addEventListener('resize', resize); resize();
+const overlay = document.getElementById('overlay');
+const titleEl = document.getElementById('title');
+const messageEl = document.getElementById('message');
+const startBtn = document.getElementById('startBtn');
+const restartBtn = document.getElementById('restartBtn');
+const hudEl = document.getElementById('hud');
 
-const STATE = {STORY:'STORY', SURVIVAL:'SURVIVAL'};
-let state = STATE.SURVIVAL;
+let W = 0;
+let H = 0;
+
+function resize() {
+  W = canvas.width = innerWidth;
+  H = canvas.height = innerHeight;
+}
+
+window.addEventListener('resize', resize);
+resize();
+
+const STATE = { READY: 'READY', PLAYING: 'PLAYING', GAMEOVER: 'GAMEOVER' };
+let state = STATE.READY;
 
 const waves = [
-  {bpm:70, length:24, events:[
-    {t:2,type:'click'},
-    {t:4,type:'drag'},
-    {t:6,type:'pattern',pattern:'left-click',text:'왼쪽 클릭으로 뇌를 헷갈리게 하는 패턴이 등장합니다.'},
-    {t:8,type:'hold',dur:1.8},
-    {t:12,type:'pattern',pattern:'right-click',text:'오른쪽 클릭으로 시선을 흔들며 대응을 요구합니다.'},
-    {t:16,type:'tempo',bpm:55,duration:6,title:'심장이 느려짐'},
-    {t:20,type:'tempo',bpm:95,duration:4,title:'심장이 빨라짐'}
-  ]},
-  {bpm:90, length:28, events:[
-    {t:1.5,type:'click'},
-    {t:3,type:'drag'},
-    {t:5,type:'pattern',pattern:'middle-click',text:'휠 클릭 패턴이 나타나 시야를 교란합니다.'},
-    {t:9,type:'hold',dur:2},
-    {t:14,type:'tempo',bpm:70,duration:5,title:'심장 박동이 느려짐'},
-    {t:20,type:'pattern',pattern:'left-click',text:'이제 방향 이동과 클릭 패턴을 동시에 유지해야 합니다.'}
-  ]}
-];
-let currentWave = 0;
-let waveStart = 0;
-const clueLog = [];
-const logBtn = document.getElementById('logBtn');
-const logPanel = document.getElementById('logPanel');
-const logSearchInput = document.getElementById('logSearch');
-const logContent = document.getElementById('logContent');
-const closeLogBtn = document.getElementById('closeLogBtn');
-const choicePanel = document.getElementById('choicePanel');
-
-let beatInterval = 60/waves[currentWave].bpm;
-let nextBeatTime = 0;
-const allowedWindow = 0.12; // seconds
-let lastBeatHandled = false;
-let spaceHeld = false;
-let lastSpaceHeldTime = 0;
-let movementStopped = false;
-let tempoRestore = null;
-const player = {x:0,y:0,speed:220,radius:18};
-
-// Audio (WebAudio) for heartbeat independent of RAF
-let audioCtx = null;
-let audioScheduled = false;
-function ensureAudio(){
-  if(audioCtx) return;
-  audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-}
-function playBeatAt(time){
-  if(!audioCtx) return;
-  const osc = audioCtx.createOscillator();
-  const g = audioCtx.createGain();
-  osc.type = 'sine';
-  osc.frequency.value = 80;
-  g.gain.value = 0.0001;
-  osc.connect(g);
-  g.connect(audioCtx.destination);
-  const now = audioCtx.currentTime;
-  const t = Math.max(now, time);
-  g.gain.setValueAtTime(0.0001, now);
-  g.gain.linearRampToValueAtTime(0.14, t + 0.001);
-  g.gain.linearRampToValueAtTime(0.0001, t + 0.08);
-  osc.start(now);
-  osc.stop(t + 0.1);
-}
-function scheduleAudioLoop(){
-  if(!audioCtx) return;
-  if(audioScheduled) return;
-  audioScheduled = true;
-  function tick(){
-    if(gameOver || state===STATE.STORY){ audioScheduled = false; return; }
-    const now = performance.now()/1000;
-    const delta = nextBeatTime - now;
-    if(delta <= 0.05){
-      // schedule immediate beat
-      playBeatAt(audioCtx.currentTime + Math.max(0, delta));
-      nextBeatTime += beatInterval;
-    }
-    setTimeout(tick, 10);
+  {
+    title: '첫 박동',
+    bpm: 72,
+    duration: 20,
+    events: [
+      { t: 1.2, type: 'click' },
+      { t: 3.4, type: 'drag' },
+      { t: 5.8, type: 'hold', holdGoal: 1.1 },
+      { t: 8.6, type: 'pattern', label: '클릭' },
+      { t: 12.4, type: 'tempo', bpm: 96, duration: 4, title: '가속' },
+      { t: 15.2, type: 'click' }
+    ]
+  },
+  {
+    title: '긴장',
+    bpm: 96,
+    duration: 20,
+    events: [
+      { t: 1.0, type: 'drag' },
+      { t: 2.8, type: 'hold', holdGoal: 1.3 },
+      { t: 5.3, type: 'pattern', label: '패턴' },
+      { t: 8.4, type: 'click' },
+      { t: 11.6, type: 'tempo', bpm: 120, duration: 4, title: '폭주' },
+      { t: 14.8, type: 'drag' }
+    ]
+  },
+  {
+    title: '최후의 리듬',
+    bpm: 118,
+    duration: 20,
+    events: [
+      { t: 1.4, type: 'click' },
+      { t: 3.2, type: 'hold', holdGoal: 1.4 },
+      { t: 6.2, type: 'pattern', label: '패턴' },
+      { t: 9.0, type: 'drag' },
+      { t: 12.0, type: 'tempo', bpm: 140, duration: 3.5, title: '폭주' },
+      { t: 15.0, type: 'click' }
+    ]
   }
-  tick();
-}
-
-let obstacles = [];
-let spawnedIndex = 0;
-
-let gameOver = false;
-let deathReason = '';
-// Story nodes per wave (array of pages)
-const stories = [
-  [
-    {title:'Prologue', text:'너의 심장은 멈췄다. 저주는 숨을 거두지 않는다. 그러나 이제 손으로 펌프질해야만 산다.'},
-    {type:'choice', title:'선택지', text:'어둠 속에서 두 갈래 길이 모습을 드러낸다. 어느 쪽으로 나아갈 것인가?', options:[
-      {label:'왼쪽 복도 - 먼지와 이물질', nextIndex:2, clue:{title:'단서: 오래된 혈흔', text:'왼쪽 길에는 오래된 혈흔과 벽에 새겨진 문양이 있다.'}},
-      {label:'오른쪽 방 - 기계음과 진동', nextIndex:3, clue:{title:'단서: 기계장치의 잔해', text:'오른쪽 방에는 깨진 기어와 건조한 피 한 방울이 있다.'}}
-    ]},
-    {title:'단서: 기묘한 잔여물', text:'벽에 묻은 점액은 누군가의 흔적처럼 보인다. 닦아내면 더 많은 흔적이 드러난다.', type:'clue'},
-    {title:'경고의 메모', text:'메모가 손에 들린다. "이 심장은 여전히 살아있다. 멈추면 끝이다."'},
-    {title:'어둠의 균열', text:'어둠 속에서 잔상이 사라진다. 다시 전투의 순간이 다가온다.'}
-  ],
-  [
-    {title:'심연의 메아리', text:'박동이 빨라질수록 환각은 뚜렷해진다. 하지만 균형을 잃으면 모든 것이 끝난다.'},
-    {type:'choice', title:'균열의 음성', text:'귀 안에서 두 목소리가 들린다. 어느 쪽에 귀를 기울일 것인가?', options:[
-      {label:'침묵의 목소리', nextIndex:3, clue:{title:'단서: 숨겨진 칼날', text:'말 없는 목소리는 날카로운 칼날과 함께 했다.'}},
-      {label:'절규의 목소리', nextIndex:4, clue:{title:'단서: 깨진 거울', text:'절규는 거울 조각 속에서 울려 퍼졌다.'}}
-    ]},
-    {title:'단서: 깨진 사포', text:'작은 사포 조각이 바닥에 떨어져 있다. 뭔가를 닦아내려 했던 흔적일까.', type:'clue'},
-    {title:'피로 물든 벽', text:'벽에는 끝없는 속삭임과 함께 기묘한 문양이 반사된다.'},
-    {title:'희미한 빛', text:'희미한 빛이 사라진다. 심장은 멈추지 않고 계속 뛰어야 한다.'}
-  ]
 ];
-let storyIndex = 0;
 
-function startWave(index){
-  currentWave = index||0;
-  waveStart = performance.now()/1000;
-  beatInterval = 60/waves[currentWave].bpm;
-  nextBeatTime = waveStart + beatInterval;
-  spawnedIndex = 0;
-  obstacles = [];
-  gameOver = false;
-  deathReason = '';
+let waveIndex = 0;
+let waveTime = 0;
+let eventIndex = 0;
+let obstacles = [];
+let pointer = { x: W / 2, y: H / 2, down: false };
+let player = { x: W / 2, y: H / 2, speed: 260, radius: 16 };
+
+let maxHealth = 3;
+let health = maxHealth;
+let beatInterval = 60 / waves[0].bpm;
+let beatTimer = 0;
+let beatActive = false;
+let beatStartAt = 0;
+let beatWindow = 0.16;
+let beatFlash = 0;
+let shake = 0;
+let activeTempo = null;
+let lastTime = 0;
+let statusText = '박동 대기';
+
+function startGame() {
+  state = STATE.PLAYING;
   overlay.classList.add('hidden');
-  ensureAudio();
-  scheduleAudioLoop();
-  overlay.dataset.mode = '';
-  restartBtn.style.display = 'inline-block';
-  player.x = W/2;
-  player.y = H/2;
-  pointer.x = W/2;
-  pointer.y = H/2;
-  movementStopped = false;
+  health = maxHealth;
+  waveIndex = 0;
+  waveTime = 0;
+  eventIndex = 0;
+  obstacles = [];
+  beatInterval = 60 / waves[0].bpm;
+  beatTimer = 0.6;
+  beatActive = false;
+  beatStartAt = 0;
+  beatFlash = 0;
+  shake = 0;
+  activeTempo = null;
+  player.x = W / 2;
+  player.y = H / 2;
+  pointer.x = W / 2;
+  pointer.y = H / 2;
+  statusText = '박동 시작';
+  updateHud();
 }
 
-function fail(reason){
-  gameOver = true;
-  deathReason = reason;
-  showGameOver();
+function updateHud() {
+  const wave = waves[waveIndex];
+  hudEl.innerHTML = `
+    <div>웨이브: ${waveIndex + 1} / ${waves.length}</div>
+    <div>상태: ${state === STATE.PLAYING ? wave.title : '대기'}</div>
+    <div>체력: ${'♥'.repeat(health)}${'♡'.repeat(maxHealth - health)}</div>
+    <div>박동: ${statusText}</div>
+  `;
 }
 
-function showGameOver(){
-  messageEl.textContent = deathReason;
+function showOverlay(title, message, showRestart = false) {
+  titleEl.textContent = title;
+  messageEl.innerHTML = message;
   overlay.classList.remove('hidden');
-  overlay.dataset.mode = 'gameover';
-  restartBtn.style.display = 'inline-block';
+  restartBtn.style.display = showRestart ? 'inline-block' : 'none';
+  startBtn.style.display = showRestart ? 'none' : 'inline-block';
 }
 
-function addClueEntry(entry){
-  const key = `${entry.wave}|${entry.title}`;
-  if(clueLog.some(item=>item.key===key)) return;
-  clueLog.push({...entry, key, timestamp: new Date()});
+function endGame() {
+  state = STATE.GAMEOVER;
+  showOverlay('심장이 멈췄다', '박동을 놓치고 끝이 찾아왔습니다.<br>다시 도전해 보세요.', true);
 }
 
-function openLog(){
-  logPanel.classList.remove('hidden');
-  renderLog();
-}
-
-function closeLog(){
-  logPanel.classList.add('hidden');
-}
-
-function formatTimestamp(ts){
-  return ts.toLocaleTimeString('ko-KR', {hour:'2-digit',minute:'2-digit'});
-}
-
-function renderLog(){
-  const filter = logSearchInput.value.trim().toLowerCase();
-  const visible = clueLog.filter(item => {
-    const combined = `${item.title} ${item.text}`.toLowerCase();
-    return !filter || combined.includes(filter);
-  });
-  if(visible.length === 0){
-    logContent.innerHTML = '<div class="entry"><div class="entry-title">검색 결과 없음</div><div>다른 검색어를 시도하거나, 단서를 더 수집하세요.</div></div>';
+function nextWave() {
+  if (waveIndex + 1 >= waves.length) {
+    state = STATE.GAMEOVER;
+    showOverlay('승리', '모든 박동을 견뎌냈습니다.<br>심장은 아직 살아 있습니다.', true);
     return;
   }
-  logContent.innerHTML = visible.map(item => `
-    <div class="entry">
-      <div class="entry-title">[WAVE ${item.wave + 1}] ${item.title}</div>
-      <div class="entry-meta">${formatTimestamp(item.timestamp)}</div>
-      <div>${item.text}</div>
-    </div>
-  `).join('');
+
+  waveIndex += 1;
+  waveTime = 0;
+  eventIndex = 0;
+  obstacles = [];
+  beatInterval = 60 / waves[waveIndex].bpm;
+  beatTimer = 0.6;
+  beatActive = false;
+  beatStartAt = 0;
+  activeTempo = null;
+  statusText = `${waves[waveIndex].title} 진입`;
+  updateHud();
 }
 
-function resetWave(){
-  startWave(currentWave);
-}
-
-restartBtn.addEventListener('click', ()=>{
-  resetWave();
-});
-addEventListener('keydown', e=>{
-  if(e.code==='KeyR') resetWave();
-  if(e.code==='KeyC'){
-    movementStopped = !movementStopped;
-    if(movementStopped){
-      messageEl.textContent = '움직임 정지 - C 키로 재개';
-      overlay.classList.remove('hidden');
-      overlay.dataset.mode = 'paused';
-      restartBtn.style.display = 'none';
-    } else {
-      overlay.classList.add('hidden');
-      overlay.dataset.mode = '';
-    }
-  }
-});
-
-overlay.addEventListener('click', (e)=>{
-  if(e.target === restartBtn) return;
-  if(e.target === closeLogBtn) return;
-  if(e.target === logBtn) return;
-  if(e.target.classList.contains('choice-button')) return;
-  // overlay click behavior depends on mode
-  const mode = overlay.dataset.mode || '';
-  if(mode === 'story' && state === STATE.STORY){
-    const s = stories[currentWave] || [];
-    const node = s[storyIndex];
-    if(node.type === 'choice') return;
-    storyIndex++;
-    if(storyIndex >= s.length){
-      // proceed to next wave
-      state = STATE.SURVIVAL;
-      overlay.dataset.mode = '';
-      const next = (currentWave + 1) % waves.length;
-      startWave(next);
-    } else {
-      renderStoryNode(s[storyIndex]);
-    }
-  }
-});
-
-addEventListener('keydown', e=>{
-  if(e.code==='Space'){
-    spaceHeld = true;
-    lastSpaceHeldTime = performance.now()/1000;
-    handleSpace(lastSpaceHeldTime);
-  }
-  if(e.code==='KeyL') openLog();
-});
-addEventListener('keyup', e=>{
-  if(e.code==='Space'){
-    spaceHeld = false;
-    lastSpaceHeldTime = performance.now()/1000;
-  }
-});
-
-function handleSpace(t){
-  if(gameOver) return;
-  const delta = t - nextBeatTime;
-  if(Math.abs(delta) <= allowedWindow){
-    nextBeatTime += beatInterval;
-    lastBeatHandled = true;
-  } else {
-    fail(delta > 0 ? '정지 - 박자를 놓쳤습니다' : '과부하 - 박자를 너무 빨리 누르셨습니다');
+function takeDamage(reason) {
+  if (state !== STATE.PLAYING) return;
+  health -= 1;
+  shake = 0.4;
+  statusText = reason;
+  updateHud();
+  if (health <= 0) {
+    endGame();
   }
 }
 
-function spawnOb(event){
-  const size = 48 + Math.random()*36;
-  const x = event.type === 'pattern' ? W/2 : Math.random()*(W-200)+100;
-  const y = event.type === 'pattern' ? 100 + (obstacles.filter(o=>o.type==='pattern').length * 60) : Math.random()*(H-200)+100;
-  const ob = {type:event.type || event, x,y,size,alive:true,age:0};
-  if(event.type === 'pattern'){
-    ob.pattern = event.pattern;
-    ob.text = event.text;
-    ob.duration = event.duration || 4;
-  }
-  if(event.type === 'tempo'){
-    ob.title = event.title || `BPM ${event.bpm}`;
-    ob.duration = event.duration || 5;
-    ob.bpm = event.bpm;
-  }
-  if(ob.type==='drag') ob.dragProgress = 0;
-  if(ob.type==='hold') ob.holdStart = 0, ob.holdReq = 1.4 + Math.random()*1.2;
+function spawnObstacle(event) {
+  const size = 46 + Math.random() * 24;
+  const ob = {
+    type: event.type,
+    x: Math.random() * (W - 140) + 70,
+    y: Math.random() * (H - 140) + 70,
+    size,
+    alive: true,
+    holdGoal: event.holdGoal || 1.2,
+    progress: 0,
+    dragging: false,
+    holding: false,
+    label: event.label || '',
+    age: 0,
+    expireTime: 2.8 + Math.random() * 0.7
+  };
   obstacles.push(ob);
 }
 
-function applyTempoEvent(event, t){
-  if(!event.bpm) return;
-  tempoRestore = {interval: beatInterval, restoreAt: t + (event.duration || 5)};
-  beatInterval = 60/event.bpm;
-  nextBeatTime = t + beatInterval;
+function activateTempo(event) {
+  activeTempo = {
+    endAt: performance.now() / 1000 + (event.duration || 4),
+    bpm: event.bpm,
+    title: event.title || '가속'
+  };
+  beatInterval = 60 / event.bpm;
+  beatTimer = Math.max(0.2, beatInterval * 0.45);
+  statusText = `${activeTempo.title} (${event.bpm} BPM)`;
+  updateHud();
 }
 
-function updateObstacles(dt){
-  const t = performance.now()/1000;
-  for(const ob of obstacles){
-    if(!ob.alive) continue;
-    if(ob.type==='drag'){
-      ob.size *= 0.999;
-    }
-    if(ob.type==='pattern' || ob.type==='tempo'){
-      ob.age += dt;
-      if(ob.age >= ob.duration) ob.alive = false;
-    }
-  }
-  if(tempoRestore && t > tempoRestore.restoreAt){
-    beatInterval = tempoRestore.interval;
-    tempoRestore = null;
-    nextBeatTime = t + beatInterval;
-  }
-  obstacles = obstacles.filter(o=>o.alive);
-}
+function updateWave(dt) {
+  if (state !== STATE.PLAYING) return;
+  waveTime += dt;
 
-let pointer = {down:false,x:W/2,y:H/2,downAt:0};
-canvas.addEventListener('pointerdown', e=>{pointer.down=true; pointer.x=e.clientX; pointer.y=e.clientY; pointer.downAt=performance.now()/1000; handlePointerDown(e);});
-canvas.addEventListener('pointermove', e=>{pointer.x=e.clientX; pointer.y=e.clientY; handlePointerMove(e);});
-canvas.addEventListener('pointerup', e=>{pointer.down=false; handlePointerUp(e);});
-logBtn.addEventListener('click', openLog);
-closeLogBtn.addEventListener('click', closeLog);
-logSearchInput.addEventListener('input', renderLog);
-
-function handlePointerDown(e){
-  for(const ob of obstacles){
-    const dx = e.clientX - ob.x; const dy = e.clientY - ob.y;
-    if(Math.hypot(dx,dy) < ob.size){
-      if(ob.type==='click') ob.alive=false;
-      if(ob.type==='hold') ob.holdStart = performance.now()/1000;
-      if(ob.type==='drag') ob.dragging = true;
-      break;
+  while (eventIndex < waves[waveIndex].events.length && waves[waveIndex].events[eventIndex].t <= waveTime) {
+    const event = waves[waveIndex].events[eventIndex];
+    if (event.type === 'tempo') {
+      activateTempo(event);
+    } else {
+      spawnObstacle(event);
     }
+    eventIndex += 1;
+  }
+
+  if (activeTempo && performance.now() / 1000 > activeTempo.endAt) {
+    activeTempo = null;
+    beatInterval = 60 / waves[waveIndex].bpm;
+    beatTimer = Math.max(0.2, beatInterval * 0.45);
+    statusText = waves[waveIndex].title;
+    updateHud();
+  }
+
+  if (waveTime >= waves[waveIndex].duration) {
+    nextWave();
   }
 }
 
-function handlePointerMove(e){
-  for(const ob of obstacles){
-    if(ob.type==='drag' && ob.dragging){
-      const dist = Math.hypot(e.clientX - ob.x, e.clientY - ob.y);
-      ob.dragProgress += Math.max(0, 1 - dist/300) * 0.02;
-      if(ob.dragProgress>=1) ob.alive=false;
+function updateHeartbeat(dt) {
+  if (state !== STATE.PLAYING) return;
+
+  if (beatActive) {
+    const elapsed = performance.now() / 1000 - beatStartAt;
+    beatFlash = Math.max(0, 1 - elapsed / beatWindow);
+    if (elapsed > beatWindow) {
+      beatActive = false;
+      takeDamage('박동 실패');
     }
-  }
-}
-
-function handlePointerUp(e){
-  for(const ob of obstacles) ob.dragging = false;
-}
-
-function update(dt, now){
-  if(gameOver) return;
-  if(state === STATE.STORY) return;
-  const t = now/1000;
-  if(!spaceHeld && t - lastSpaceHeldTime > 0.35){
-    fail('심장 멈춤 - Spacebar를 계속 누르고 있어야 합니다');
     return;
   }
-  const elapsed = t - waveStart;
-  const wd = waves[currentWave];
-  while(spawnedIndex < wd.events.length && elapsed >= wd.events[spawnedIndex].t){
-    const event = wd.events[spawnedIndex];
-    if(event.type === 'tempo') applyTempoEvent(event, t);
-    spawnOb(event);
-    spawnedIndex++;
+
+  beatTimer -= dt;
+  if (beatTimer <= 0) {
+    beatActive = true;
+    beatStartAt = performance.now() / 1000;
+    beatTimer = beatInterval;
+    beatFlash = 1;
   }
-  if(t > nextBeatTime + allowedWindow){
-    fail('정지 - 박자를 놓쳤습니다');
-  }
-  // wave end -> STORY phase
-  if(elapsed >= wd.length){
-    state = STATE.STORY;
-    // prepare story pages for this wave
-    const s = stories[currentWave] || [];
-    storyIndex = 0;
-    overlay.dataset.mode = 'story';
-    overlay.classList.remove('hidden');
-    restartBtn.style.display = 'none';
-    if(s.length>0){
-      renderStoryNode(s[0]);
-    } else {
-      messageEl.textContent = '휴식 구간 — 클릭하여 다음으로';
-    }
-  }
-  for(const ob of obstacles){
-    if(ob.type==='hold' && ob.holdStart){
-      const held = Math.max(0, t - ob.holdStart);
-      if(held >= ob.holdReq) ob.alive=false;
-    }
-  }
-  updateObstacles(dt);
 }
 
-function draw(now){
-  ctx.clearRect(0,0,W,H);
-  const centerX = W/2, centerY = H/2;
-  const t = now/1000;
-  const phase = Math.min(1, Math.max(0, 1 - Math.abs(t - nextBeatTime)/allowedWindow));
-  // UI degradation based on wave progress
-  const wd = waves[currentWave];
-  const elapsed = Math.max(0, t - waveStart);
-  const progress = Math.min(1, wd ? elapsed / wd.length : 0);
-  const jitter = progress * 8;
-  const radius = 60 + 40*phase;
-  ctx.fillStyle = '#111';
-  ctx.beginPath(); ctx.arc(centerX + (Math.random()-0.5)*jitter,centerY + (Math.random()-0.5)*jitter,120 - progress*30,0,Math.PI*2); ctx.fill();
-  ctx.fillStyle = '#ff4d4f'; ctx.beginPath(); ctx.arc(centerX + (Math.random()-0.5)*jitter,centerY + (Math.random()-0.5)*jitter,radius - progress*8,0,Math.PI*2); ctx.fill();
+function resolveBeat() {
+  if (!beatActive || state !== STATE.PLAYING) return;
+  const elapsed = performance.now() / 1000 - beatStartAt;
+  const error = Math.abs(elapsed);
 
-  // Guide line (fades/jitters)
-  ctx.strokeStyle = `rgba(255,255,255,${Math.max(0.2, 1-progress)})`;
-  ctx.lineWidth = 2 + (1-phase)*3;
-  ctx.beginPath();
-  ctx.moveTo(centerX - 200 + (Math.random()-0.5)*jitter, centerY + 140 + (Math.random()-0.5)*jitter);
-  ctx.lineTo(centerX + 200 + (Math.random()-0.5)*jitter, centerY + 140 + (Math.random()-0.5)*jitter);
-  ctx.stroke();
+  beatActive = false;
+  beatFlash = 0;
+  beatTimer = Math.max(0.2, beatInterval * 0.8);
 
-  for(const ob of obstacles){
-    ctx.save();
-    ctx.translate(ob.x, ob.y);
-    const shakeX = (Math.random()-0.5)*progress*6;
-    const shakeY = (Math.random()-0.5)*progress*6;
-    ctx.translate(shakeX, shakeY);
-    if(ob.type==='click'){
-      ctx.fillStyle = '#f1c40f';
-      ctx.beginPath(); ctx.arc(0,0,ob.size/2,0,Math.PI*2); ctx.fill();
-    } else if(ob.type==='drag'){
-      ctx.fillStyle = '#9b59b6';
-      ctx.fillRect(-ob.size/2, -ob.size/2, ob.size, ob.size);
-      ctx.fillStyle='#000'; ctx.fillRect(-ob.size/2, ob.size/2 + 6 - ob.dragProgress*ob.size, ob.size*ob.dragProgress, 6);
-    } else if(ob.type==='hold'){
-      ctx.fillStyle = '#3498db'; ctx.beginPath(); ctx.arc(0,0,ob.size/2,0,Math.PI*2); ctx.fill();
-      if(ob.holdStart){
-        const held = Math.max(0, t - ob.holdStart);
-        const p = Math.min(1, held/ob.holdReq);
-        ctx.fillStyle='#000'; ctx.fillRect(-ob.size/2, ob.size/2 + 6, ob.size*p, 6);
-      }
-    } else if(ob.type==='pattern'){
-      ctx.fillStyle = '#e67e22';
-      ctx.beginPath(); ctx.arc(0,0,ob.size/2,0,Math.PI*2); ctx.fill();
-      ctx.fillStyle = '#fff';
-      ctx.font = '14px Arial';
-      ctx.textAlign = 'center';
-      ctx.fillText(ob.pattern, 0, 5);
-    } else if(ob.type==='tempo'){
-      ctx.fillStyle = '#8e44ad';
-      ctx.beginPath(); ctx.arc(0,0,ob.size/2,0,Math.PI*2); ctx.fill();
-      ctx.fillStyle = '#fff';
-      ctx.font = '14px Arial';
-      ctx.textAlign = 'center';
-      ctx.fillText(ob.title, 0, 5);
-    }
-    ctx.restore();
-  }
-  // draw player and target direction
-  ctx.strokeStyle = 'rgba(255,255,255,0.25)';
-  ctx.lineWidth = 2;
-  ctx.beginPath();
-  ctx.moveTo(player.x, player.y);
-  ctx.lineTo(pointer.x, pointer.y);
-  ctx.stroke();
-  ctx.fillStyle = movementStopped ? '#95a5a6' : '#2ecc71';
-  ctx.beginPath(); ctx.arc(player.x, player.y, player.radius,0,Math.PI*2); ctx.fill();
-  ctx.fillStyle = '#fff';
-  ctx.beginPath(); ctx.arc(pointer.x, pointer.y, 6,0,Math.PI*2); ctx.fill();
-  // draw player and target direction
-  ctx.strokeStyle = 'rgba(255,255,255,0.25)';
-  ctx.lineWidth = 2;
-  ctx.beginPath();
-  ctx.moveTo(player.x, player.y);
-  ctx.lineTo(pointer.x, pointer.y);
-  ctx.stroke();
-  ctx.fillStyle = movementStopped ? '#95a5a6' : '#2ecc71';
-  ctx.beginPath(); ctx.arc(player.x, player.y, player.radius,0,Math.PI*2); ctx.fill();
-  ctx.fillStyle = '#fff';
-  ctx.beginPath(); ctx.arc(pointer.x, pointer.y, 6,0,Math.PI*2); ctx.fill();
-}
-
-function renderStoryNode(node){
-  choicePanel.innerHTML = '';
-  if(node.type === 'choice'){
-    messageEl.innerHTML = `<strong>${node.title}</strong><p style="margin-top:8px">${node.text}</p><small style="display:block;margin-top:8px;opacity:0.8">선택지를 골라 진행하세요</small>`;
-    node.options.forEach((option, index)=>{
-      const btn = document.createElement('button');
-      btn.textContent = option.label;
-      btn.className = 'choice-button';
-      btn.addEventListener('click', ()=>handleChoice(option));
-      choicePanel.appendChild(btn);
-    });
+  if (error <= beatWindow * 0.25) {
+    statusText = 'Perfect';
+    shake = 0.1;
+  } else if (error <= beatWindow * 0.7) {
+    statusText = 'Good';
+    shake = 0.06;
   } else {
-    if(node.type === 'clue'){
-      addClueEntry({wave: currentWave, title: node.title, text: node.text});
-    }
-    messageEl.innerHTML = `<strong>${node.title}</strong><p style="margin-top:8px">${node.text}</p><small style="display:block;margin-top:8px;opacity:0.8">클릭하여 계속</small>`;
+    takeDamage('박동 미스');
+    return;
   }
+
+  updateHud();
 }
 
-function handleChoice(option){
-  if(option.clue){
-    addClueEntry({wave: currentWave, title: option.clue.title || option.label, text: option.clue.text || ''});
-  }
-  if(typeof option.nextIndex === 'number'){
-    storyIndex = option.nextIndex;
-    const s = stories[currentWave] || [];
-    if(storyIndex >= s.length){
-      state = STATE.SURVIVAL;
-      overlay.dataset.mode = '';
-      const next = (currentWave + 1) % waves.length;
-      startWave(next);
-      return;
+function updateObstacles(dt) {
+  for (const ob of obstacles) {
+    if (!ob.alive) continue;
+
+    ob.age += dt;
+    if (ob.age >= ob.expireTime) {
+      ob.alive = false;
+      takeDamage('패턴 놓침');
+      continue;
     }
-    renderStoryNode(s[storyIndex]);
+
+    if (ob.type === 'hold' && ob.holding) {
+      ob.progress += dt;
+      if (ob.progress >= ob.holdGoal) {
+        ob.alive = false;
+      }
+    }
+
+    if (ob.type === 'drag' && ob.dragging) {
+      const dist = Math.hypot(pointer.x - ob.x, pointer.y - ob.y);
+      ob.progress += dt * (dist < ob.size * 1.1 ? 1.2 : 0.4);
+      if (ob.progress >= 1) {
+        ob.alive = false;
+      }
+    }
   }
+
+  obstacles = obstacles.filter(ob => ob.alive);
 }
 
-function movePlayer(dt){
-  if(movementStopped) return;
+function movePlayer(dt) {
+  if (state !== STATE.PLAYING) return;
   const dx = pointer.x - player.x;
   const dy = pointer.y - player.y;
-  const dist = Math.hypot(dx,dy);
-  if(dist < 4) return;
-  const vx = dx/dist;
-  const vy = dy/dist;
+  const dist = Math.hypot(dx, dy);
+  if (dist < 1) return;
+  const vx = dx / dist;
+  const vy = dy / dist;
   player.x += vx * player.speed * dt;
   player.y += vy * player.speed * dt;
-  player.x = Math.max(player.radius, Math.min(W-player.radius, player.x));
-  player.y = Math.max(player.radius, Math.min(H-player.radius, player.y));
+  player.x = Math.max(player.radius, Math.min(W - player.radius, player.x));
+  player.y = Math.max(player.radius, Math.min(H - player.radius, player.y));
 }
 
-let last = performance.now();
-function loop(now){
-  const dt = (now - last)/1000; last = now;
-  movePlayer(dt);
-  update(dt, now);
-  draw(now);
+function drawBackground() {
+  const gradient = ctx.createLinearGradient(0, 0, W, H);
+  gradient.addColorStop(0, '#080b12');
+  gradient.addColorStop(1, '#161a27');
+  ctx.fillStyle = gradient;
+  ctx.fillRect(0, 0, W, H);
+
+  const waveGlow = 20 + (beatActive ? 20 : 0) + shake * 24;
+  ctx.save();
+  ctx.translate((Math.random() - 0.5) * shake * 16, (Math.random() - 0.5) * shake * 16);
+  ctx.fillStyle = 'rgba(255, 77, 79, 0.12)';
+  ctx.beginPath();
+  ctx.arc(W / 2, H / 2, 140 + waveGlow, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
+}
+
+function drawHeartbeat() {
+  const pulse = beatActive ? 1 : 0.4 + Math.max(0, beatFlash);
+  const radius = 70 + pulse * 28;
+  ctx.save();
+  ctx.translate((Math.random() - 0.5) * shake * 10, (Math.random() - 0.5) * shake * 10);
+  ctx.strokeStyle = beatActive ? '#ff6b6b' : '#ffe66d';
+  ctx.lineWidth = 3 + pulse * 2;
+  ctx.beginPath();
+  ctx.arc(W / 2, H / 2, radius, 0, Math.PI * 2);
+  ctx.stroke();
+  ctx.fillStyle = beatActive ? '#ff6b6b' : '#ff8e8f';
+  ctx.beginPath();
+  ctx.arc(W / 2, H / 2, 34 + pulse * 8, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
+}
+
+function drawObstacles() {
+  for (const ob of obstacles) {
+    ctx.save();
+    ctx.translate(ob.x, ob.y);
+    ctx.translate((Math.random() - 0.5) * shake * 6, (Math.random() - 0.5) * shake * 6);
+
+    if (ob.type === 'click' || ob.type === 'pattern') {
+      ctx.fillStyle = '#ffd166';
+      ctx.beginPath();
+      ctx.arc(0, 0, ob.size / 2, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = '#111';
+      ctx.font = '13px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText(ob.label || 'CLICK', 0, 4);
+    } else if (ob.type === 'drag') {
+      ctx.fillStyle = '#9b5de5';
+      ctx.fillRect(-ob.size / 2, -ob.size / 2, ob.size, ob.size);
+      ctx.fillStyle = '#fff';
+      ctx.fillRect(-ob.size / 2 + 6, ob.size / 2 + 6, ob.size * Math.min(1, ob.progress) - 12, 6);
+    } else if (ob.type === 'hold') {
+      ctx.fillStyle = '#4cc9f0';
+      ctx.beginPath();
+      ctx.arc(0, 0, ob.size / 2, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = '#062b3f';
+      ctx.fillRect(-ob.size / 2 + 6, ob.size / 2 + 6, ob.size * Math.min(1, ob.progress) - 12, 6);
+    }
+
+    ctx.restore();
+  }
+}
+
+function drawPlayer() {
+  ctx.strokeStyle = 'rgba(255,255,255,0.25)';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(player.x, player.y);
+  ctx.lineTo(pointer.x, pointer.y);
+  ctx.stroke();
+
+  ctx.fillStyle = '#4ade80';
+  ctx.beginPath();
+  ctx.arc(player.x, player.y, player.radius, 0, Math.PI * 2);
+  ctx.fill();
+
+  ctx.fillStyle = '#fff';
+  ctx.beginPath();
+  ctx.arc(pointer.x, pointer.y, 5, 0, Math.PI * 2);
+  ctx.fill();
+}
+
+function draw() {
+  drawBackground();
+  drawHeartbeat();
+  drawObstacles();
+  drawPlayer();
+}
+
+function loop(now) {
+  const dt = Math.min(0.033, (now - lastTime) / 1000 || 0.016);
+  lastTime = now;
+
+  if (state === STATE.PLAYING) {
+    movePlayer(dt);
+    updateWave(dt);
+    updateHeartbeat(dt);
+    updateObstacles(dt);
+  }
+
+  draw();
+  shake = Math.max(0, shake - dt * 0.4);
   requestAnimationFrame(loop);
 }
 
-startWave(0);
-requestAnimationFrame(loop);
+function handlePointerDown(e) {
+  pointer.x = e.clientX;
+  pointer.y = e.clientY;
+  pointer.down = true;
+
+  if (state !== STATE.PLAYING) return;
+
+  for (const ob of obstacles) {
+    if (!ob.alive) continue;
+    const dx = pointer.x - ob.x;
+    const dy = pointer.y - ob.y;
+    if (Math.hypot(dx, dy) <= ob.size / 2) {
+      if (ob.type === 'click' || ob.type === 'pattern') {
+        ob.alive = false;
+      } else if (ob.type === 'hold') {
+        ob.holding = true;
+      } else if (ob.type === 'drag') {
+        ob.dragging = true;
+      }
+    }
+  }
+}
+
+function handlePointerMove(e) {
+  pointer.x = e.clientX;
+  pointer.y = e.clientY;
+}
+
+function handlePointerUp() {
+  pointer.down = false;
+  for (const ob of obstacles) {
+    ob.dragging = false;
+    ob.holding = false;
+  }
+}
+
+function handleKeydown(e) {
+  if (e.code === 'Space') {
+    e.preventDefault();
+    if (state === STATE.PLAYING) {
+      resolveBeat();
+    }
+  }
+  if (e.code === 'Enter' && state !== STATE.PLAYING) {
+    startGame();
+  }
+  if (e.code === 'KeyR' && state === STATE.GAMEOVER) {
+    startGame();
+  }
+}
+
+canvas.addEventListener('pointerdown', handlePointerDown);
+canvas.addEventListener('pointermove', handlePointerMove);
+canvas.addEventListener('pointerup', handlePointerUp);
+canvas.addEventListener('pointerleave', handlePointerUp);
+window.addEventListener('keydown', handleKeydown);
+startBtn.addEventListener('click', startGame);
+restartBtn.addEventListener('click', startGame);
+
+showOverlay('Heartbeat', '마우스로 이동하고<br>박동에 맞춰 Space를 눌러 생존하세요.', false);
+updateHud();
